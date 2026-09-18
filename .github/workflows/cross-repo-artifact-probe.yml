@@ -1,0 +1,56 @@
+name: Cross-repository Pages artifact association probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_id:
+        description: Private donor repository artifact ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  probe:
+    environment:
+      name: github-pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Submit foreign artifact ID to recipient Pages deployment API
+        uses: actions/github-script@v8
+        env:
+          FOREIGN_ARTIFACT_ID: ${{ inputs.artifact_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const artifactId = Number(process.env.FOREIGN_ARTIFACT_ID)
+            if (!Number.isSafeInteger(artifactId)) {
+              core.setFailed(`Invalid foreign artifact ID: ${process.env.FOREIGN_ARTIFACT_ID}`)
+              return
+            }
+
+            const oidcToken = await core.getIDToken()
+            try {
+              const response = await github.request(
+                'POST /repos/{owner}/{repo}/pages/deployments',
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifactId,
+                  pages_build_version: context.sha,
+                  oidc_token: oidcToken
+                }
+              )
+
+              core.notice(`CROSS_REPO_POST_STATUS=${response.status}`)
+              core.notice(`CROSS_REPO_ARTIFACT_ID=${artifactId}`)
+              core.notice(`CROSS_REPO_DEPLOYMENT_ID=${response.data.id || ''}`)
+              core.notice('CROSS_REPO_ARTIFACT_ACCEPTED=yes')
+            } catch (error) {
+              core.notice(`CROSS_REPO_POST_STATUS=${error.status || 'unknown'}`)
+              core.notice(`CROSS_REPO_REJECTION=${error.message}`)
+              core.notice('CROSS_REPO_ARTIFACT_ACCEPTED=no')
+            }
