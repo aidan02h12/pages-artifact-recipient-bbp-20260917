@@ -1,0 +1,58 @@
+name: Same-repository Pages artifact control
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  control:
+    environment:
+      name: github-pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create recipient marker
+        shell: bash
+        run: |
+          mkdir -p site
+          printf '%s\n' 'RECIPIENT_SELF_MARKER_20260917_AIDAN02H12' > site/index.html
+
+      - name: Upload same-repository Pages artifact
+        id: upload
+        uses: actions/upload-pages-artifact@v4
+        with:
+          name: recipient-pages
+          path: site
+
+      - name: Create deployment directly through the Pages API
+        id: deploy
+        uses: actions/github-script@v8
+        env:
+          SELF_ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const artifactId = Number(process.env.SELF_ARTIFACT_ID)
+            if (!Number.isSafeInteger(artifactId)) {
+              core.setFailed(`Invalid self artifact ID: ${process.env.SELF_ARTIFACT_ID}`)
+              return
+            }
+
+            const oidcToken = await core.getIDToken()
+            const response = await github.request(
+              'POST /repos/{owner}/{repo}/pages/deployments',
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifactId,
+                pages_build_version: context.sha,
+                oidc_token: oidcToken
+              }
+            )
+
+            core.notice(`SELF_CONTROL_POST_STATUS=${response.status}`)
+            core.notice(`SELF_CONTROL_ARTIFACT_ID=${artifactId}`)
+            core.notice(`SELF_CONTROL_DEPLOYMENT_ID=${response.data.id || ''}`)
